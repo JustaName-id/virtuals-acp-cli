@@ -392,7 +392,7 @@ async function claimEnsName(
   opts: { label?: string; interactive: boolean; json: boolean }
 ): Promise<{ ens?: string; error?: string }> {
   let label = opts.label;
-  for (;;) {
+  for (let attempt = 0; ; attempt++) {
     try {
       const { ens } = await ensApi.claim(agentId, { label });
       return { ens };
@@ -400,9 +400,10 @@ async function claimEnsName(
       if (!(err instanceof EnsLabelTakenError)) {
         return { error: err instanceof Error ? err.message : String(err) };
       }
-      // Headless: take the suggested free label (or give up if there is none).
+      // Headless: take the suggested free label. Cap retries so a contended
+      // namespace can't loop forever (each suggestion could also get taken).
       if (opts.json || !opts.interactive) {
-        if (!err.suggestion) return { error: err.message };
+        if (!err.suggestion || attempt >= 5) return { error: err.message };
         label = err.suggestion;
         continue;
       }
