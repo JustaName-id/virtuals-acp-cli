@@ -8,10 +8,25 @@ import {
 import { CliError } from "../errors";
 import { AuthApi } from "./auth";
 import { AgentApi } from "./agent";
+import { EnsApi } from "./ens";
 import {
   ACP_SERVER_URL,
   ACP_TESTNET_SERVER_URL,
 } from "@virtuals-protocol/acp-node-v2";
+
+/**
+ * Resolve the REST API base URL. `ACP_API_BASE_URL` overrides the default
+ * (mainnet/testnet) so the CLI can target a local proxy during development
+ * without touching any call sites; unset it to use the real backend.
+ * WILL BE REMOVED WHEN MIGRATING TO VIRTUALS BACKEND
+ */
+function resolveBaseUrl(): string {
+  const override = process.env.ACP_API_BASE_URL?.trim();
+  if (override) return override.replace(/\/+$/, "");
+  return process.env.IS_TESTNET === "true"
+    ? ACP_TESTNET_SERVER_URL
+    : ACP_SERVER_URL;
+}
 
 export class ApiClient {
   constructor(private baseUrl: string, private token?: string) {}
@@ -131,14 +146,15 @@ async function resolveToken(apiUrl: string): Promise<string> {
 export async function getClient(unauthenticated?: boolean): Promise<{
   agentApi: AgentApi;
   authApi: AuthApi;
+  ensApi: EnsApi;
 }> {
-  const isTestnet = process.env.IS_TESTNET === "true";
-  const apiUrl = isTestnet ? ACP_TESTNET_SERVER_URL : ACP_SERVER_URL;
+  const apiUrl = resolveBaseUrl();
   const token = unauthenticated ? undefined : await resolveToken(apiUrl);
   const httpClient = new ApiClient(apiUrl, token);
   return {
     agentApi: new AgentApi(httpClient),
     authApi: new AuthApi(httpClient),
+    ensApi: new EnsApi(httpClient),
   };
 }
 

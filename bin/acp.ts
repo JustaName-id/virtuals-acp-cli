@@ -20,6 +20,7 @@ import { registerCardCommands } from "../src/commands/card";
 import { registerComputeCommands } from "../src/commands/compute";
 import { registerSkillCommands } from "../src/commands/skill";
 import { registerTradeCommands } from "../src/commands/trade";
+import { registerEnsCommands } from "../src/commands/ens";
 
 const require = createRequire(import.meta.url);
 
@@ -66,5 +67,6 @@ registerCardCommands(program);
 registerComputeCommands(program);
 registerSkillCommands(program);
 registerTradeCommands(program);
+registerEnsCommands(program);
 
 program.parse();

@@ -20,6 +20,7 @@ import {
   SIGNER_POLICIES,
 } from "../lib/api/agent";
 import { getClient } from "../lib/api/client";
+import { EnsLabelTakenError, type EnsApi } from "../lib/api/ens";
 import {
   prompt,
   selectFromList,
@@ -385,6 +386,47 @@ async function runRegisterErc8004Flow(
   return true;
 }
 
+async function claimEnsName(
+  ensApi: EnsApi,
+  agentId: string,
+  opts: { label?: string; interactive: boolean; json: boolean }
+): Promise<{ ens?: string; error?: string }> {
+  let label = opts.label;
+  for (;;) {
+    try {
+      const { ens } = await ensApi.claim(agentId, { label });
+      return { ens };
+    } catch (err) {
+      if (!(err instanceof EnsLabelTakenError)) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+      // Headless: take the suggested free label (or give up if there is none).
+      if (opts.json || !opts.interactive) {
+        if (!err.suggestion) return { error: err.message };
+        label = err.suggestion;
+        continue;
+      }
+      // Interactive: ask for a different label rather than choosing for them.
+      console.log(`\n${c.yellow(err.message)}`);
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      const answer = (
+        await prompt(
+          rl,
+          `Enter a different ENS label${
+            err.suggestion ? ` (press Enter for "${err.suggestion}")` : ""
+          }: `
+        )
+      ).trim();
+      rl.close();
+      label = answer || err.suggestion;
+      if (!label) return {}; // gave up — leave the agent unnamed
+    }
+  }
+}
+
 export function registerAgentCommands(program: Command): void {
   const agent = program.command("agent").description("Manage ACP agents");
 
@@ -403,6 +445,11 @@ export function registerAgentCommands(program: Command): void {
         ).join("; ") +
         ".",
       "restricted"
+    )
+    .option("--no-ens", "Skip auto-claiming an ENS name for the new agent")
+    .option(
+      "--ens-label <label>",
+      "ENS label to claim (defaults to a slug of the agent name)"
     )
     .action(async (opts, cmd) => {
       const json = isJson(cmd);
@@ -531,6 +578,23 @@ export function registerAgentCommands(program: Command): void {
         emailError = err instanceof Error ? err.message : String(err);
       }
 
+      // Born named: auto-claim an ENS name for the new agent (avatar/description
+      // are seeded server-side). Non-fatal — never blocks creation.
+      let ensName: string | undefined;
+      let ensError: string | undefined;
+      if (opts.ens !== false) {
+        try {
+          const { ensApi } = await getClient();
+          ({ ens: ensName, error: ensError } = await claimEnsName(
+            ensApi,
+            created.id,
+            { label: opts.ensLabel, interactive, json }
+          ));
+        } catch (err) {
+          ensError = err instanceof Error ? err.message : String(err);
+        }
+      }
+
       if (json) {
         outputResult(json, {
           name: created.name,
@@ -538,6 +602,8 @@ export function registerAgentCommands(program: Command): void {
           walletAddress: created.walletAddress,
           emailAddress,
           ...(emailError ? { emailError } : {}),
+          ...(ensName ? { ens: ensName } : {}),
+          ...(ensError ? { ensError } : {}),
         });
         return;
       }
@@ -552,6 +618,7 @@ export function registerAgentCommands(program: Command): void {
         ["Wallet Address", created.walletAddress ?? "N/A"],
       ];
       if (emailAddress) tableRows.push(["Email", emailAddress]);
+      if (ensName) tableRows.push(["ENS", ensName]);
       printTable(tableRows);
 
       if (emailAddress) {
@@ -564,6 +631,12 @@ export function registerAgentCommands(program: Command): void {
         console.log(
           `\n${c.yellow("Could not provision email identity:")} ${emailError}`
         );
+      }
+
+      if (ensName) {
+        console.log(`${c.green("ENS name claimed:")} ${c.cyan(ensName)}`);
+      } else if (ensError && opts.ens !== false) {
+        console.log(`${c.yellow("Could not claim an ENS name:")} ${ensError}`);
       }
 
       let setupSigner = opts.signer === true;
